@@ -1,0 +1,136 @@
+"""Manifest patcher for Android TV conversion.
+Updates AndroidManifest.xml for Leanback launcher, touchscreen relaxation, and banner.
+"""
+from pathlib import Path
+import xml.etree.ElementTree as ET
+from typing import Dict, List, Tuple
+
+ANDROID_NS = "http://schemas.android.com/apk/res/android"
+ET.register_namespace("android", ANDROID_NS)
+
+def qname(tag_or_attr: str) -> str:
+    """Helper to produce Clark notation for Android namespace."""
+    return f"{{{ANDROID_NS}}}{tag_or_attr}"
+
+def patch_manifest(decompiled_dir: Path, banner_drawable: str = "@drawable/tv_banner") -> Tuple[bool, List[str]]:
+    """Patch AndroidManifest.xml in decompiled_dir for Android TV.
+    
+    Returns:
+        (success: bool, changes_made: List[str])
+    """
+    manifest_path = Path(decompiled_dir) / "AndroidManifest.xml"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"AndroidManifest.xml not found at {manifest_path}")
+
+    # Parse XML preserving namespaces
+    tree = ET.parse(manifest_path)
+    root = tree.getroot()
+    changes: List[str] = []
+
+    # 1. Patch or insert uses-feature touchscreen = false
+    touchscreen_features = [
+        elem for elem in root.findall("uses-feature")
+        if elem.attrib.get(qname("name")) == "android.hardware.touchscreen"
+    ]
+    if touchscreen_features:
+        for elem in touchscreen_features:
+            if elem.attrib.get(qname("required")) != "false":
+                elem.attrib[qname("required")] = "false"
+                changes.append("Updated android.hardware.touchscreen required='false'")
+    else:
+        feat = ET.Element("uses-feature", {
+            qname("name"): "android.hardware.touchscreen",
+            qname("required"): "false"
+        })
+        root.insert(0, feat)
+        changes.append("Added android.hardware.touchscreen required='false'")
+
+    # 2. Patch or insert uses-feature leanback = false (false allows compatibility on both phone/TV)
+    leanback_features = [
+        elem for elem in root.findall("uses-feature")
+        if elem.attrib.get(qname("name")) == "android.software.leanback"
+    ]
+    if not leanback_features:
+        feat = ET.Element("uses-feature", {
+            qname("name"): "android.software.leanback",
+            qname("required"): "false"
+        })
+        root.insert(0, feat)
+        changes.append("Added android.software.leanback required='false'")
+
+    # 3. Add faketouch feature (common requirement for non-touch TV devices)
+    faketouch_features = [
+        elem for elem in root.findall("uses-feature")
+        if elem.attrib.get(qname("name")) == "android.hardware.faketouch"
+    ]
+    if not faketouch_features:
+        feat = ET.Element("uses-feature", {
+            qname("name"): "android.hardware.faketouch",
+            qname("required"): "false"
+        })
+        root.insert(0, feat)
+        changes.append("Added android.hardware.faketouch required='false'")
+
+    # 4. Patch Application tag (banner, hardware acceleration, resizeable)
+    app_elem = root.find("application")
+    if app_elem is not None:
+        if qname("banner") not in app_elem.attrib:
+            app_elem.attrib[qname("banner")] = banner_drawable
+            changes.append(f"Set application android:banner='{banner_drawable}'")
+
+        # Strip API 35+ attributes unknown to older framework definitions (baseline TV is API 30)
+        unsupported_attrs = [
+            qname("allowCrossUidActivitySwitchFromBelow"),
+        ]
+        for elem in root.iter():
+            for u_attr in unsupported_attrs:
+                if u_attr in elem.attrib:
+                    del elem.attrib[u_attr]
+                    changes.append(f"Removed API 35+ attribute {u_attr.split('}')[-1]} for TV compatibility")
+
+        # Relax portrait orientation constraint on activities
+        for activity in app_elem.findall("activity") + app_elem.findall("activity-alias"):
+            screen_orient = activity.attrib.get(qname("screenOrientation"))
+            if screen_orient in ("portrait", "reversePortrait", "sensorPortrait", "userPortrait"):
+                activity.attrib[qname("screenOrientation")] = "unspecified"
+                act_name = activity.attrib.get(qname("name"), "UnknownActivity")
+                changes.append(f"Relaxed portrait orientation on {act_name} to 'unspecified'")
+
+    # 5. Patch Launchable Activity with LEANBACK_LAUNCHER intent-filter
+    main_activities = []
+    has_leanback = False
+
+    if app_elem is not None:
+        activities = app_elem.findall("activity") + app_elem.findall("activity-alias")
+        for act in activities:
+            for ifilter in act.findall("intent-filter"):
+                has_main = any(a.attrib.get(qname("name")) == "android.intent.action.MAIN" for a in ifilter.findall("action"))
+                has_launcher = any(c.attrib.get(qname("name")) == "android.intent.category.LAUNCHER" for c in ifilter.findall("category"))
+                if any(c.attrib.get(qname("name")) == "android.intent.category.LEANBACK_LAUNCHER" for c in ifilter.findall("category")):
+                    has_leanback = True
+
+                if has_main and has_launcher:
+                    main_activities.append((act, ifilter))
+
+        if not has_leanback:
+            if main_activities:
+                target_act, target_filter = main_activities[0]
+                cat = ET.Element("category", {qname("name"): "android.intent.category.LEANBACK_LAUNCHER"})
+                target_filter.append(cat)
+                act_name = target_act.attrib.get(qname("name"), "MainActivity")
+                changes.append(f"Added LEANBACK_LAUNCHER category to {act_name}")
+            else:
+                # If no explicit launcher found, create a standalone intent filter on first activity
+                all_acts = app_elem.findall("activity")
+                if all_acts:
+                    target_act = all_acts[0]
+                    new_filter = ET.Element("intent-filter")
+                    new_filter.append(ET.Element("action", {qname("name"): "android.intent.action.MAIN"}))
+                    new_filter.append(ET.Element("category", {qname("name"): "android.intent.category.LEANBACK_LAUNCHER"}))
+                    target_act.append(new_filter)
+                    act_name = target_act.attrib.get(qname("name"), "FirstActivity")
+                    changes.append(f"Created LEANBACK_LAUNCHER intent-filter on {act_name}")
+
+    # Write patched manifest back to file
+    tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
+    return True, changes

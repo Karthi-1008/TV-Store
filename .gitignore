@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.idsig
+
+# Gradle and Android build outputs
+.gradle/
+build/
+output/
+dist/
+bridge_app/.gradle/
+bridge_app/local.properties
+bridge_app/app/build/
+
+# Tools cache
+tools/*.jar

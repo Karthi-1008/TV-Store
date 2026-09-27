@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">TV Remote Bridge</string>
+    <string name="service_description">Translates D-pad TV remote navigation into spatial touch gestures for touch-first apps.</string>
+    <string name="status_enabled">Status: Bridge Service is ACTIVE</string>
+    <string name="status_disabled">Status: Bridge Service is DISABLED</string>
+    <string name="btn_open_settings">Open Accessibility Settings</string>
+    <string name="tv_instructions">Enable \'TV Remote Bridge\' in Settings -> Accessibility to navigate any touch app using your D-pad remote.</string>
+</resources>
