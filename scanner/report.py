@@ -48,7 +48,8 @@ def format_text_report(res: APKScanResult) -> str:
         Tier.TIER_2_HYBRID_BRIDGE: "Tier 2: Hybrid / Cross-Platform (Engine A + Engine B Bridge)",
         Tier.TIER_3_GESTURE_MACRO: "Tier 3: Swipe / Feed Navigation (Engine A + Engine B + Gesture Macro)",
         Tier.TIER_4_CUSTOM_CANVAS: "Tier 4: Custom Canvas (Needs Hotspot Calibration, off by default)",
-        Tier.TIER_5_EXCLUDED: "Tier 5: Excluded / Incompatible (Games, DRM, Missing Hardware)",
+        Tier.TIER_5_HARDWARE_DEGRADED: "Tier 5: Hardware Degraded (Camera/GPS/Telephony absent on TV - Proceeds with warnings)",
+        Tier.TIER_6_EXCLUDED: "Tier 6: Excluded / Incompatible (DRM, Anti-tamper, Real Game Engines)",
     }[res.tier]
 
     lines.append(f"  VERDICT:      {verdict_badge}")

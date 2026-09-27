@@ -68,7 +68,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
 
         if not conv_res.success:
             if conv_res.scan_result.verdict == Verdict.REJECT:
-                print(f"  -> SKIPPED (Tier 5 Excluded): {conv_res.error_message}")
+                print(f"  -> SKIPPED (Tier 6 Excluded): {conv_res.error_message}")
                 skipped_count += 1
             elif conv_res.scan_result.tier == Tier.TIER_4_CUSTOM_CANVAS:
                 print(f"  -> SKIPPED (Tier 4 Manual Needed): {conv_res.error_message}")

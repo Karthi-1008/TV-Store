@@ -9,26 +9,27 @@ class Tier(Enum):
     TIER_2_HYBRID_BRIDGE = 2     # Flutter / React Native / WebView (Manifest + Bridge Tree-walk)
     TIER_3_GESTURE_MACRO = 3     # Vertical feed / swipe-heavy / Pager (Manifest + Bridge + Swipe Macro)
     TIER_4_CUSTOM_CANVAS = 4     # Non-accessible Canvas / SurfaceView (Needs manual calibration, off by default)
-    TIER_5_EXCLUDED = 5          # Hard blocker: Games, DRM/Integrity, Hardware missing (REJECT)
+    TIER_5_HARDWARE_DEGRADED = 5 # Hardware missing (Camera/GPS/Telephony/Gyro/NFC/Biometrics) -> Graceful degradation
+    TIER_6_EXCLUDED = 6          # Hard blocker: DRM/Anti-tamper, Real Game engines (REJECT)
 
 class Verdict(Enum):
-    PROCEED = "PROCEED"                      # Safe to convert automatically (Tiers 1, 2, 3)
+    PROCEED = "PROCEED"                      # Safe to convert automatically (Tiers 1, 2, 3, 5)
     WARN_MANUAL = "WARN_MANUAL"              # Requires manual calibration (Tier 4, needs --allow-manual)
-    REJECT = "REJECT"                        # Hard stop, do not convert (Tier 5)
+    REJECT = "REJECT"                        # Hard stop, do not convert (Tier 6)
 
-# Hardware features that Android TV (baseline MT5867) lacks
-BLOCKED_HARDWARE_FEATURES = {
-    "android.hardware.camera": "Requires camera hardware which Android TV lacks.",
-    "android.hardware.camera.autofocus": "Requires autofocus camera.",
-    "android.hardware.camera.front": "Requires front camera.",
-    "android.hardware.telephony": "Requires cellular telephony hardware.",
-    "android.hardware.telephony.gsm": "Requires GSM telephony.",
-    "android.hardware.telephony.cdma": "Requires CDMA telephony.",
-    "android.hardware.sensor.gyroscope": "Requires physical gyroscope.",
-    "android.hardware.location.gps": "Requires GPS hardware (TV only has network location).",
-    "android.hardware.nfc": "Requires NFC hardware.",
-    "android.hardware.fingerprint": "Requires biometric fingerprint scanner.",
-    "android.hardware.biometrics.fingerprint": "Requires biometric hardware.",
+# Hardware features that Android TV (baseline MT5867) lacks, but which apps can gracefully degrade on
+DEGRADABLE_HARDWARE_FEATURES = {
+    "android.hardware.camera": "Camera-dependent features (QR scan, photo/video capture, Stories/Reels creation) will not work. App should otherwise function.",
+    "android.hardware.camera.autofocus": "Autofocus-dependent camera features will not work.",
+    "android.hardware.camera.front": "Front-camera features (selfie mode, video calls) will not work.",
+    "android.hardware.telephony": "SMS/cellular telephony features will not work on TV. Use a reachable phone number elsewhere or existing session.",
+    "android.hardware.telephony.gsm": "GSM telephony hardware not available on TV.",
+    "android.hardware.telephony.cdma": "CDMA telephony hardware not available on TV.",
+    "android.hardware.sensor.gyroscope": "Tilt/motion-based controls or sensor effects will not work.",
+    "android.hardware.location.gps": "Precise GPS hardware will not work; network location may still function if supported.",
+    "android.hardware.nfc": "NFC features (tap-to-pay/share) will not work.",
+    "android.hardware.fingerprint": "Biometric fingerprint login will not work; app should fall back to password/PIN.",
+    "android.hardware.biometrics.fingerprint": "Biometric scanner not available on TV.",
 }
 
 # Signatures for DRM, integrity verification, and anti-tamper SDKs that fail when re-signed

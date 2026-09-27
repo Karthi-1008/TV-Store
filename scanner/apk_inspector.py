@@ -10,7 +10,7 @@ from typing import List, Dict, Set, Optional
 import config
 from scanner.rules import (
     Tier, Verdict,
-    BLOCKED_HARDWARE_FEATURES,
+    DEGRADABLE_HARDWARE_FEATURES,
     DRM_AND_INTEGRITY_SIGNATURES,
     GAME_ENGINE_NATIVE_LIBS,
     GAME_ENGINE_DEX_SIGNATURES,
@@ -128,10 +128,11 @@ def scan_apk(apk_path: Path) -> APKScanResult:
     native_libs_found: List[str] = []
     dex_signatures_found: List[str] = []
 
-    # 1. Check Required Hardware Features in Manifest
+    # 1. Check Hardware Features in Manifest for Graceful Degradation
+    degraded_features: List[tuple[str, str]] = []
     for feat in metadata.required_features:
-        if feat in BLOCKED_HARDWARE_FEATURES:
-            blockers.append(f"Blocked Hardware: {feat} ({BLOCKED_HARDWARE_FEATURES[feat]})")
+        if feat in DEGRADABLE_HARDWARE_FEATURES:
+            degraded_features.append((feat, DEGRADABLE_HARDWARE_FEATURES[feat]))
 
     # 2. Inspect ZIP contents (native libs & DEX strings)
     is_game = False
@@ -208,12 +209,22 @@ def scan_apk(apk_path: Path) -> APKScanResult:
 
     # Determine Tier and Verdict
     if blockers or has_drm or is_game:
-        tier = Tier.TIER_5_EXCLUDED
+        tier = Tier.TIER_6_EXCLUDED
         verdict = Verdict.REJECT
     elif is_ambiguous_canvas:
         tier = Tier.TIER_4_CUSTOM_CANVAS
         verdict = Verdict.WARN_MANUAL
         framework_notes.append("Custom Canvas / OpenGL ES rendering detected without accessibility tree; requires manual hotspot calibration (Tier 4).")
+    elif degraded_features:
+        tier = Tier.TIER_5_HARDWARE_DEGRADED
+        verdict = Verdict.PROCEED
+        for feat, note in degraded_features:
+            warnings.append(f"Hardware not available on TV: {feat} — {note}")
+        framework_notes.append(
+            "App will be converted and should install/run normally. Features requiring unavailable "
+            "hardware will be non-functional, similar to denying that permission on a phone. "
+            "Note: Runtime crash risk exists if the app accesses missing hardware without null checks."
+        )
     elif is_swipe_feed:
         tier = Tier.TIER_3_GESTURE_MACRO
         verdict = Verdict.PROCEED

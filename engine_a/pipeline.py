@@ -60,7 +60,7 @@ def convert_apk_engine_a(
             layout_files_patched=0,
             widgets_patched=0,
             duration_seconds=time.time() - start_time,
-            error_message="Conversion rejected by pre-flight scanner: App is in Tier 5 (Games, DRM, or Missing Hardware).",
+            error_message="Conversion rejected by pre-flight scanner: App is in Tier 6 (DRM/Anti-tamper or Real Game Engines).",
         )
 
     if scan_res.tier == Tier.TIER_4_CUSTOM_CANVAS and not allow_manual_calibration:

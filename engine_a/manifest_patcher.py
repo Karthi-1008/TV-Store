@@ -72,7 +72,28 @@ def patch_manifest(decompiled_dir: Path, banner_drawable: str = "@drawable/tv_ba
         root.insert(0, feat)
         changes.append("Added android.hardware.faketouch required='false'")
 
-    # 4. Patch Application tag (banner, hardware acceleration, resizeable)
+    # 4. Relax degradable hardware features to required='false' (camera, telephony, GPS, gyro, biometrics, NFC)
+    degradable_feature_names = [
+        "android.hardware.camera",
+        "android.hardware.camera.autofocus",
+        "android.hardware.camera.front",
+        "android.hardware.telephony",
+        "android.hardware.telephony.gsm",
+        "android.hardware.telephony.cdma",
+        "android.hardware.sensor.gyroscope",
+        "android.hardware.location.gps",
+        "android.hardware.nfc",
+        "android.hardware.fingerprint",
+        "android.hardware.biometrics.fingerprint",
+    ]
+    for feat_name in degradable_feature_names:
+        matching = [e for e in root.findall("uses-feature") if e.attrib.get(qname("name")) == feat_name]
+        for elem in matching:
+            if elem.attrib.get(qname("required")) != "false":
+                elem.attrib[qname("required")] = "false"
+                changes.append(f"Relaxed {feat_name} to required='false' (graceful hardware degradation)")
+
+    # 5. Patch Application tag (banner, hardware acceleration, resizeable)
     app_elem = root.find("application")
     if app_elem is not None:
         if qname("banner") not in app_elem.attrib:
