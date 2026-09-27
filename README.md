@@ -44,7 +44,7 @@ Engineered specifically around the **TCL Android TV profile (MediaTek MT5867, 1G
 
 ---
 
-## Compatibility Tiers
+## Compatibility Tiers (UI & Navigation Architecture)
 
 | Tier | Category | Conversion Path | Status |
 |---|---|---|---|
@@ -52,18 +52,17 @@ Engineered specifically around the **TCL Android TV profile (MediaTek MT5867, 1G
 | **Tier 2** | Hybrid / Flutter / React Native / WebView | Engine A + TV Remote Bridge | **Spatial Tree-Walk Navigation** |
 | **Tier 3** | Swipe Feeds / Vertical Pagers | Engine A + TV Remote Bridge | **Directional Swipe Macros** |
 | **Tier 4** | Custom Canvas (Ambiguous GLES) | Manual Hotspot Calibration | Off by default (`--allow-manual-calibration`) |
-| **Tier 5** | Hardware Degraded (Camera/GPS/Telephony/Gyro/NFC) | Engine A Hardware Relaxation + Bridge | **PROCEED with Warnings (Graceful Degradation)** |
-| **Tier 6** | Hard Blockers (DRM/Anti-tamper, Real Game Engines) | *Hard Blocked by Pre-flight Scanner* | **Safely Skipped (No broken builds)** |
+| **Tier 5** | Hard Blockers (DRM/Anti-tamper, Real Game Engines) | *Hard Blocked by Pre-flight Scanner* | **Safely Skipped (No broken builds)** |
 
 ---
 
-## Graceful Hardware Degradation (Tier 5)
+## Graceful Hardware Degradation (Orthogonal Hardware Advisory)
 
-Rather than treating the absence of mobile hardware (camera, GPS, telephony, gyroscope, biometrics, NFC) as an automatic rejection, the converter treats them as **gracefully degradable** (analogous to runtime permission denial on phones):
-* **Manifest Relaxation:** Features declared with `android:required="true"` are relaxed to `android:required="false"`, allowing the APK to install on non-touch, TV-spec devices.
-* **Degradation Warnings:** The scanner reports specific functional limitations (e.g. *"QR scanning / story creation disabled; remainder of app functions normally"*).
-* **Crash Risk & Validation:** Because some apps fail to include null-checks when hardware services return null, Tier 5 apps should be verified on target hardware to confirm unhandled exceptions are not thrown when interacting with missing hardware screens.
-* **Integrity/DRM Boundary:** Apps utilizing server-side cryptographic tamper attestation (SafetyNet, Play Integrity, DexGuard, etc.) remain in **Tier 6 (Hard Reject)** since hardware relaxation cannot resolve cryptographic signature verification.
+Missing phone hardware (camera, GPS, telephony, gyroscope, biometrics, NFC) is treated as an **orthogonal hardware advisory on top of the real UI tier**, rather than overriding the app's navigation classification:
+* **True UI Tier Preserved:** A Flutter app requiring a camera is accurately labeled as **Tier 2 (Hybrid Bridge)** with a **[DEGRADED] Hardware Advisory**, ensuring users always know which bridge tools are required.
+* **Manifest Relaxation:** Features declared with `android:required="true"` are automatically relaxed to `android:required="false"`, lifting the Android TV OS install-time gate.
+* **Degradation Warnings:** The scanner prints clear per-feature advisories (e.g. *"QR scan/camera capture disabled; core UI navigates normally via TV Remote Bridge"*).
+* **Integrity/DRM Boundary:** Cryptographic tamper attestation (SafetyNet, Play Integrity, DexGuard, etc.) remains a hard blocker in **Tier 5 (Hard Reject)** because hardware relaxation cannot bypass signature verification.
 
 ---
 

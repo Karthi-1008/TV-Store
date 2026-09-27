@@ -9,13 +9,12 @@ class Tier(Enum):
     TIER_2_HYBRID_BRIDGE = 2     # Flutter / React Native / WebView (Manifest + Bridge Tree-walk)
     TIER_3_GESTURE_MACRO = 3     # Vertical feed / swipe-heavy / Pager (Manifest + Bridge + Swipe Macro)
     TIER_4_CUSTOM_CANVAS = 4     # Non-accessible Canvas / SurfaceView (Needs manual calibration, off by default)
-    TIER_5_HARDWARE_DEGRADED = 5 # Hardware missing (Camera/GPS/Telephony/Gyro/NFC/Biometrics) -> Graceful degradation
-    TIER_6_EXCLUDED = 6          # Hard blocker: DRM/Anti-tamper, Real Game engines (REJECT)
+    TIER_5_EXCLUDED = 5          # Hard blocker: DRM/Anti-tamper, Real Game engines (REJECT)
 
 class Verdict(Enum):
-    PROCEED = "PROCEED"                      # Safe to convert automatically (Tiers 1, 2, 3, 5)
+    PROCEED = "PROCEED"                      # Safe to convert automatically (Tiers 1, 2, 3)
     WARN_MANUAL = "WARN_MANUAL"              # Requires manual calibration (Tier 4, needs --allow-manual)
-    REJECT = "REJECT"                        # Hard stop, do not convert (Tier 6)
+    REJECT = "REJECT"                        # Hard stop, do not convert (Tier 5)
 
 # Hardware features that Android TV (baseline MT5867) lacks, but which apps can gracefully degrade on
 DEGRADABLE_HARDWARE_FEATURES = {

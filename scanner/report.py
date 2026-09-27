@@ -21,6 +21,8 @@ def result_to_dict(res: APKScanResult) -> Dict[str, Any]:
         "framework_notes": res.framework_notes,
         "native_libs": res.native_libs_found,
         "dex_signatures": res.dex_signatures_found,
+        "has_hardware_degradation": res.has_hardware_degradation,
+        "degraded_hardware": res.degraded_hardware,
     }
 
 def format_text_report(res: APKScanResult) -> str:
@@ -48,12 +50,14 @@ def format_text_report(res: APKScanResult) -> str:
         Tier.TIER_2_HYBRID_BRIDGE: "Tier 2: Hybrid / Cross-Platform (Engine A + Engine B Bridge)",
         Tier.TIER_3_GESTURE_MACRO: "Tier 3: Swipe / Feed Navigation (Engine A + Engine B + Gesture Macro)",
         Tier.TIER_4_CUSTOM_CANVAS: "Tier 4: Custom Canvas (Needs Hotspot Calibration, off by default)",
-        Tier.TIER_5_HARDWARE_DEGRADED: "Tier 5: Hardware Degraded (Camera/GPS/Telephony absent on TV - Proceeds with warnings)",
-        Tier.TIER_6_EXCLUDED: "Tier 6: Excluded / Incompatible (DRM, Anti-tamper, Real Game Engines)",
+        Tier.TIER_5_EXCLUDED: "Tier 5: Excluded / Incompatible (DRM, Anti-tamper, Real Game Engines)",
     }[res.tier]
 
     lines.append(f"  VERDICT:      {verdict_badge}")
     lines.append(f"  CATEGORY:     {tier_desc}")
+    if res.has_hardware_degradation:
+        hw_names = ", ".join(f[0].split(".")[-1].capitalize() for f in res.degraded_hardware)
+        lines.append(f"  HARDWARE:     [ DEGRADED ] Missing on TV: {hw_names} (Features disabled, app runs)")
     lines.append(subbar)
 
     if res.framework_notes:

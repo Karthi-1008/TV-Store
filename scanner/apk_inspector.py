@@ -49,6 +49,8 @@ class APKScanResult:
     framework_notes: List[str] = field(default_factory=list)
     native_libs_found: List[str] = field(default_factory=list)
     dex_signatures_found: List[str] = field(default_factory=list)
+    has_hardware_degradation: bool = False
+    degraded_hardware: List[tuple[str, str]] = field(default_factory=list)
 
 def extract_badging_metadata(apk_path: Path) -> APKMetadata:
     """Use aapt2 dump badging to extract manifest info quickly."""
@@ -207,24 +209,14 @@ def scan_apk(apk_path: Path) -> APKScanResult:
             is_ambiguous_canvas = True
             warnings.append("Could not confirm standard UI framework; app may need manual hotspot calibration (Tier 4) rather than automatic rejection.")
 
-    # Determine Tier and Verdict
+    # Determine UI / Framework Tier and Verdict
     if blockers or has_drm or is_game:
-        tier = Tier.TIER_6_EXCLUDED
+        tier = Tier.TIER_5_EXCLUDED
         verdict = Verdict.REJECT
     elif is_ambiguous_canvas:
         tier = Tier.TIER_4_CUSTOM_CANVAS
         verdict = Verdict.WARN_MANUAL
         framework_notes.append("Custom Canvas / OpenGL ES rendering detected without accessibility tree; requires manual hotspot calibration (Tier 4).")
-    elif degraded_features:
-        tier = Tier.TIER_5_HARDWARE_DEGRADED
-        verdict = Verdict.PROCEED
-        for feat, note in degraded_features:
-            warnings.append(f"Hardware not available on TV: {feat} — {note}")
-        framework_notes.append(
-            "App will be converted and should install/run normally. Features requiring unavailable "
-            "hardware will be non-functional, similar to denying that permission on a phone. "
-            "Note: Runtime crash risk exists if the app accesses missing hardware without null checks."
-        )
     elif is_swipe_feed:
         tier = Tier.TIER_3_GESTURE_MACRO
         verdict = Verdict.PROCEED
@@ -241,6 +233,19 @@ def scan_apk(apk_path: Path) -> APKScanResult:
         else:
             framework_notes.append("No specific framework signature matched; defaulting to Tier 1. Verify D-pad focus manually after conversion.")
 
+    # Hardware Degradation is an orthogonal advisory note on top of the real tier
+    has_hardware_degradation = len(degraded_features) > 0
+    if has_hardware_degradation:
+        for feat, note in degraded_features:
+            warnings.append(f"Hardware not available on TV: {feat} — {note}")
+        hardware_list_str = ", ".join(f[0].split(".")[-1] for f in degraded_features)
+        engine_str = "Engine A (Manifest patch)" if tier == Tier.TIER_1_NATIVE_VIEWS else "Engine A + TV Remote Bridge"
+        framework_notes.append(
+            f"Hardware Degradation Note: App requires unavailable hardware ({hardware_list_str}). "
+            "Manifest will be relaxed so app installs; features requiring this hardware will be disabled, "
+            f"while the rest of the app navigates using {engine_str}."
+        )
+
     return APKScanResult(
         apk_path=apk_path,
         metadata=metadata,
@@ -251,4 +256,6 @@ def scan_apk(apk_path: Path) -> APKScanResult:
         framework_notes=framework_notes,
         native_libs_found=native_libs_found,
         dex_signatures_found=dex_signatures_found,
+        has_hardware_degradation=has_hardware_degradation,
+        degraded_hardware=degraded_features,
     )
