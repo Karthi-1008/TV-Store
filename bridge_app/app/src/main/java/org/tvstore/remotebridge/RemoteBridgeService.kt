@@ -40,8 +40,13 @@ class RemoteBridgeService : AccessibilityService() {
         updateScreenDimensions()
     }
 
+    private var currentForegroundPackage: String? = null
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        event.packageName?.let {
+            currentForegroundPackage = it.toString()
+        }
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 // Window changed, invalidate old focus
@@ -72,6 +77,13 @@ class RemoteBridgeService : AccessibilityService() {
 
     override fun onKeyEvent(event: KeyEvent?): Boolean {
         if (event == null || event.action != KeyEvent.ACTION_DOWN) {
+            return super.onKeyEvent(event)
+        }
+
+        // Per-app scoping: Only intercept if foreground app is registered as a converted app
+        val foregroundPackage = rootInActiveWindow?.packageName?.toString() ?: currentForegroundPackage
+        if (foregroundPackage == null || !ConvertedAppsRegistry.isRegistered(this, foregroundPackage)) {
+            // Not one of our converted apps — do nothing, let OS/app handle it natively
             return super.onKeyEvent(event)
         }
 

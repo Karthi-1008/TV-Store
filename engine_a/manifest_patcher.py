@@ -4,6 +4,7 @@ Updates AndroidManifest.xml for Leanback launcher, touchscreen relaxation, and b
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Tuple
+import config
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 ET.register_namespace("android", ANDROID_NS)
@@ -78,15 +79,14 @@ def patch_manifest(decompiled_dir: Path, banner_drawable: str = "@drawable/tv_ba
             app_elem.attrib[qname("banner")] = banner_drawable
             changes.append(f"Set application android:banner='{banner_drawable}'")
 
-        # Strip API 35+ attributes unknown to older framework definitions (baseline TV is API 30)
-        unsupported_attrs = [
-            qname("allowCrossUidActivitySwitchFromBelow"),
-        ]
+        # Strip post-API 30 attributes unknown to older framework definitions (baseline TV is API 30)
+        unsupported_qnames = {qname(attr) for attr in config.UNSUPPORTED_POST_API30_ATTRS}
         for elem in root.iter():
-            for u_attr in unsupported_attrs:
-                if u_attr in elem.attrib:
-                    del elem.attrib[u_attr]
-                    changes.append(f"Removed API 35+ attribute {u_attr.split('}')[-1]} for TV compatibility")
+            matched_attrs = [a for a in elem.attrib if a in unsupported_qnames]
+            for a in matched_attrs:
+                del elem.attrib[a]
+                attr_name = a.split("}")[-1]
+                changes.append(f"Removed post-API 30 attribute {attr_name} for TV compatibility")
 
         # Relax portrait orientation constraint on activities
         for activity in app_elem.findall("activity") + app_elem.findall("activity-alias"):

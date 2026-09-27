@@ -194,18 +194,26 @@ def scan_apk(apk_path: Path) -> APKScanResult:
                     has_native_views = True
                     dex_signatures_found.append(f"Native Views: {desc}")
 
-    # OpenGL ES check for Games
+    # OpenGL ES check for Games vs Custom Canvas
+    is_ambiguous_canvas = False
     if metadata.uses_gl_es and not has_native_views and not is_hybrid:
-        # App declares OpenGL ES without standard UI widgets or hybrid engines -> Likely custom OpenGL game/app
         warnings.append(f"App declares OpenGL ES version {metadata.uses_gl_es} without standard widgets.")
-        if "game" in metadata.package_name.lower() or not is_hybrid:
+        if "game" in metadata.package_name.lower():
             is_game = True
-            blockers.append("App relies directly on OpenGL ES rendering without accessibility widget tree.")
+            blockers.append("Package name and OpenGL-only rendering suggest a game engine.")
+        else:
+            # Ambiguous case — don't hard-reject. Route to Tier 4 (manual calibration)
+            is_ambiguous_canvas = True
+            warnings.append("Could not confirm standard UI framework; app may need manual hotspot calibration (Tier 4) rather than automatic rejection.")
 
     # Determine Tier and Verdict
     if blockers or has_drm or is_game:
         tier = Tier.TIER_5_EXCLUDED
         verdict = Verdict.REJECT
+    elif is_ambiguous_canvas:
+        tier = Tier.TIER_4_CUSTOM_CANVAS
+        verdict = Verdict.WARN_MANUAL
+        framework_notes.append("Custom Canvas / OpenGL ES rendering detected without accessibility tree; requires manual hotspot calibration (Tier 4).")
     elif is_swipe_feed:
         tier = Tier.TIER_3_GESTURE_MACRO
         verdict = Verdict.PROCEED
@@ -214,11 +222,13 @@ def scan_apk(apk_path: Path) -> APKScanResult:
         tier = Tier.TIER_2_HYBRID_BRIDGE
         verdict = Verdict.PROCEED
         framework_notes.append("Requires Engine A + Engine B Accessibility Bridge (Tree-Walk).")
-    elif has_native_views or True:
-        # Default for non-blocked apps is Tier 1
+    else:
         tier = Tier.TIER_1_NATIVE_VIEWS
         verdict = Verdict.PROCEED
-        framework_notes.append("Standard Android Views detected. Can run with Engine A (Manifest patch).")
+        if has_native_views:
+            framework_notes.append("Standard Android Views/Compose detected. Engine A (Manifest patch) should be sufficient.")
+        else:
+            framework_notes.append("No specific framework signature matched; defaulting to Tier 1. Verify D-pad focus manually after conversion.")
 
     return APKScanResult(
         apk_path=apk_path,

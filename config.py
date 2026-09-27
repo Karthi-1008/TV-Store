@@ -68,6 +68,33 @@ KEYSTORE_PASS = "android"
 KEY_ALIAS = "androiddebugkey"
 KEY_PASS = "android"
 
+# Known manifest attributes introduced post-API 30 that cause AAPT2 link failures
+# when targeting TV baseline (Android 11 / API 30). Centralized for maintainability.
+UNSUPPORTED_POST_API30_ATTRS = [
+    # Android 12 (API 31/32)
+    "splashScreenTheme",
+    "windowSplashScreenAnimatedIcon",
+    "windowSplashScreenAnimationDuration",
+    "windowSplashScreenBackground",
+    "windowSplashScreenIconBackgroundColor",
+    "windowSplashScreenBrandingImage",
+    "attributionsAreUserVisible",
+    # Android 13 (API 33)
+    "enableOnBackInvokedCallback",
+    "localeConfig",
+    "canDisplayOnRemoteDevices",
+    # Android 14 (API 34)
+    "knownActivityEmbeddingCerts",
+    "requiredDisplayCategory",
+    # Android 15 & 16 (API 35/36)
+    "allowCrossUidActivitySwitchFromBelow",
+    "cloudMediaProviderAuthority",
+    "allowUndo",
+    "overrideOrientation",
+    "preserveWindowPosition",
+    "enableDesktopModeOnSecondaryDisplays",
+]
+
 # TV Profile Constraints
 TARGET_SCREEN_WIDTH = 1280
 TARGET_SCREEN_HEIGHT = 720

@@ -12,5 +12,6 @@ bridge_app/.gradle/
 bridge_app/local.properties
 bridge_app/app/build/
 
-# Tools cache
+# Tools and archive cache
 tools/*.jar
+*.zip

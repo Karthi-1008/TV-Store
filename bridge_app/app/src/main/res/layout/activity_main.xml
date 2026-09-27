@@ -2,50 +2,94 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
+    android:orientation="horizontal"
     android:background="@color/bg_dark"
     android:padding="32dp">
 
-    <TextView
-        android:id="@+id/tvTitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/app_name"
-        android:textColor="@color/text_primary"
-        android:textSize="32sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
+    <!-- Left side: Status and Settings -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:paddingEnd="24dp">
 
-    <TextView
-        android:id="@+id/tvDescription"
-        android:layout_width="600dp"
-        android:layout_height="wrap_content"
-        android:text="@string/tv_instructions"
-        android:textColor="@color/text_secondary"
-        android:textSize="16sp"
-        android:gravity="center"
-        android:layout_marginBottom="24dp" />
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textColor="@color/text_primary"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
 
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/status_disabled"
-        android:textColor="@color/status_red"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="32dp" />
+        <TextView
+            android:id="@+id/tvDescription"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/tv_instructions"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp"
+            android:layout_marginBottom="20dp" />
 
-    <Button
-        android:id="@+id/btnSettings"
-        android:layout_width="320dp"
-        android:layout_height="56dp"
-        android:text="@string/btn_open_settings"
-        android:backgroundTint="@color/accent_blue"
-        android:textColor="@color/text_primary"
-        android:textSize="16sp"
-        android:focusable="true"
-        android:focusableInTouchMode="true" />
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/status_disabled"
+            android:textColor="@color/status_red"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="24dp" />
+
+        <Button
+            android:id="@+id/btnSettings"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="@string/btn_open_settings"
+            android:backgroundTint="@color/accent_blue"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:focusable="true"
+            android:focusableInTouchMode="true" />
+    </LinearLayout>
+
+    <!-- Right side: Scoped / Registered Apps List -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:background="@color/card_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Scoped Apps (Active Bridge Target)"
+            android:textColor="@color/text_primary"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="The bridge ONLY intercepts D-pad events inside registered packages below. Native TV apps and Launcher are never touched."
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
+        <ListView
+            android:id="@+id/lvPackages"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="@color/bg_dark"
+            android:dividerHeight="2dp"
+            android:focusable="true" />
+    </LinearLayout>
 
 </LinearLayout>

@@ -6,7 +6,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ListView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -15,6 +17,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
     private lateinit var btnSettings: Button
+    private lateinit var lvPackages: ListView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,6 +25,7 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         btnSettings = findViewById(R.id.btnSettings)
+        lvPackages = findViewById(R.id.lvPackages)
 
         btnSettings.setOnClickListener {
             val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
@@ -34,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateServiceStatus()
+        refreshRegisteredPackages()
     }
 
     private fun updateServiceStatus() {
@@ -45,6 +50,12 @@ class MainActivity : AppCompatActivity() {
             tvStatus.text = getString(R.string.status_disabled)
             tvStatus.setTextColor(ContextCompat.getColor(this, R.color.status_red))
         }
+    }
+
+    private fun refreshRegisteredPackages() {
+        val packages = ConvertedAppsRegistry.getRegisteredPackages(this).sorted()
+        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, packages)
+        lvPackages.adapter = adapter
     }
 
     private fun isAccessibilityServiceEnabled(

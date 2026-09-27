@@ -191,6 +191,22 @@ def convert_apk_engine_a(
                 error_message=f"apksigner verification failed:\n{proc_verify.stderr}",
             )
 
+        # 10. Record package in converted_packages.json for Bridge Scoping
+        try:
+            import json
+            registry_file = output_apk.parent / "converted_packages.json"
+            packages = set()
+            if registry_file.exists():
+                try:
+                    packages = set(json.loads(registry_file.read_text(encoding="utf-8")))
+                except Exception:
+                    packages = set()
+            if scan_res.metadata.package_name:
+                packages.add(scan_res.metadata.package_name)
+            registry_file.write_text(json.dumps(sorted(list(packages)), indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
         return ConversionResult(
             success=True,
             output_apk=output_apk,

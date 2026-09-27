@@ -27,10 +27,11 @@ Engineered specifically around the **TCL Android TV profile (MediaTek MT5867, 1G
    | 1. apktool decompile          |                          (No broken builds)
    | 2. 16:9 Banner Auto-Gen       |
    | 3. Manifest TV & Leanback     |
-   | 4. Focus-Order Injection Pass |
-   | 5. apktool recompile          |
-   | 6. zipalign 4-byte            |
-   | 7. apksigner (v1/v2/v3)       |
+   | 4. Post-API30 Attribute Clean |
+   | 5. Focus-Order Injection Pass |
+   | 6. apktool recompile          |
+   | 7. zipalign 4-byte            |
+   | 8. apksigner (v1/v2/v3)       |
    +---------------+---------------+
                    |
                    v
@@ -50,8 +51,29 @@ Engineered specifically around the **TCL Android TV profile (MediaTek MT5867, 1G
 | **Tier 1** | Standard Views / Jetpack Compose | Engine A Manifest & Focus Patch | **100% Native D-pad** |
 | **Tier 2** | Hybrid / Flutter / React Native / WebView | Engine A + TV Remote Bridge | **Spatial Tree-Walk Navigation** |
 | **Tier 3** | Swipe Feeds / Vertical Pagers | Engine A + TV Remote Bridge | **Directional Swipe Macros** |
-| **Tier 4** | Custom Canvas (Static) | Manual Hotspot Calibration | Off by default (`--allow-manual-calibration`) |
+| **Tier 4** | Custom Canvas (Ambiguous GLES) | Manual Hotspot Calibration | Off by default (`--allow-manual-calibration`) |
 | **Tier 5** | Games, Anti-tamper/DRM, Camera/GPS required | *Hard Blocked by Pre-flight Scanner* | **Safely Skipped** |
+
+---
+
+## Per-App Scoping & TV Launcher Safety
+
+The companion `TV Remote Bridge` app is strictly **scoped per-app**:
+* **Never intercepts native TV apps or system launcher:** `RemoteBridgeService` immediately passes through key events to the OS (`super.onKeyEvent`) unless the active foreground app matches an entry in `ConvertedAppsRegistry`.
+* **Dynamic Registration:** When an app is converted by `convert.py`, its package name is recorded in `output/converted_packages.json`.
+* **Broadcast Registration:** Packages can be dynamically registered on the TV via ADB:
+  ```bash
+  adb shell am broadcast -a org.tvstore.remotebridge.ACTION_REGISTER_PACKAGE --es package_name com.example.app
+  ```
+* **Visual UI:** The `MainActivity` of TV Remote Bridge lists all currently registered packages in a dedicated dashboard.
+
+---
+
+## Manifest Attribute Sanitization (API 31-36 Compatibility)
+
+Modern APKs compiled against Android 14–16 (API 34–36) often declare preview attributes in their manifests (e.g. `android:allowCrossUidActivitySwitchFromBelow`, `android:knownActivityEmbeddingCerts`, `android:enableOnBackInvokedCallback`). When recompiling with standard AAPT2 on Android 11 / API 30 targets, these unknown attributes cause fatal build linking errors.
+
+Engine A includes an automated attribute sanitization pass (`config.UNSUPPORTED_POST_API30_ATTRS`) that strips non-standard post-API 30 attributes before resource linking, preserving full app functionality while preventing build failures.
 
 ---
 
@@ -78,6 +100,6 @@ python convert.py convert path/to/app.apk -o output/app_tv.apk
 
 ## Included Artifacts in `output/`
 
-* `TVRemoteBridge.apk`: The shared, lightweight accessibility companion service for spatial navigation on Tier 2 & 3 apps (Flutter, React Native, WebViews, and swipe pagers).
+* `TVRemoteBridge.apk`: The shared, scoped accessibility companion service for spatial navigation on Tier 2 & 3 apps (Flutter, React Native, WebViews, and swipe pagers).
 * `Musify_tv.apk`: Converted Flutter audio player (Leanback launcher + TV banner + focus attributes + touchscreen disabled).
 * `PrismGallery_tv.apk`: Converted media viewer with 18 interactive widgets across 7 layouts patched for D-pad focus.
