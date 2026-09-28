@@ -146,40 +146,55 @@ def patch_manifest(
                 act_name = activity.attrib.get(qname("name"), "UnknownActivity")
                 changes.append(f"Relaxed portrait orientation on {act_name} to 'unspecified'")
 
-    # 5. Patch Launchable Activity with LEANBACK_LAUNCHER intent-filter
+    # 5. Patch Launchable Activity with LEANBACK_LAUNCHER intent-filter and explicit banner
     main_activities = []
-    has_leanback = False
+    leanback_activities = []
 
     if app_elem is not None:
+        effective_banner = app_elem.attrib.get(qname("banner"), banner_drawable)
+        app_label = app_elem.attrib.get(qname("label"))
+        app_icon = app_elem.attrib.get(qname("icon"))
+
         activities = app_elem.findall("activity") + app_elem.findall("activity-alias")
         for act in activities:
             for ifilter in act.findall("intent-filter"):
                 has_main = any(a.attrib.get(qname("name")) == "android.intent.action.MAIN" for a in ifilter.findall("action"))
                 has_launcher = any(c.attrib.get(qname("name")) == "android.intent.category.LAUNCHER" for c in ifilter.findall("category"))
                 if any(c.attrib.get(qname("name")) == "android.intent.category.LEANBACK_LAUNCHER" for c in ifilter.findall("category")):
-                    has_leanback = True
+                    leanback_activities.append(act)
 
                 if has_main and has_launcher:
                     main_activities.append((act, ifilter))
 
-        if not has_leanback:
-            if main_activities:
-                target_act, target_filter = main_activities[0]
-                cat = ET.Element("category", {qname("name"): "android.intent.category.LEANBACK_LAUNCHER"})
-                target_filter.append(cat)
+        target_act = None
+        if leanback_activities:
+            target_act = leanback_activities[0]
+        elif main_activities:
+            target_act, target_filter = main_activities[0]
+            cat = ET.Element("category", {qname("name"): "android.intent.category.LEANBACK_LAUNCHER"})
+            target_filter.append(cat)
+            act_name = target_act.attrib.get(qname("name"), "MainActivity")
+            changes.append(f"Added LEANBACK_LAUNCHER category to {act_name}")
+        else:
+            all_acts = app_elem.findall("activity")
+            if all_acts:
+                target_act = all_acts[0]
+                new_filter = ET.Element("intent-filter")
+                new_filter.append(ET.Element("action", {qname("name"): "android.intent.action.MAIN"}))
+                new_filter.append(ET.Element("category", {qname("name"): "android.intent.category.LEANBACK_LAUNCHER"}))
+                target_act.append(new_filter)
+                act_name = target_act.attrib.get(qname("name"), "FirstActivity")
+                changes.append(f"Created LEANBACK_LAUNCHER intent-filter on {act_name}")
+
+        if target_act is not None:
+            if qname("banner") not in target_act.attrib and effective_banner:
+                target_act.attrib[qname("banner")] = effective_banner
                 act_name = target_act.attrib.get(qname("name"), "MainActivity")
-                changes.append(f"Added LEANBACK_LAUNCHER category to {act_name}")
-            else:
-                # If no explicit launcher found, create a standalone intent filter on first activity
-                all_acts = app_elem.findall("activity")
-                if all_acts:
-                    target_act = all_acts[0]
-                    new_filter = ET.Element("intent-filter")
-                    new_filter.append(ET.Element("action", {qname("name"): "android.intent.action.MAIN"}))
-                    new_filter.append(ET.Element("category", {qname("name"): "android.intent.category.LEANBACK_LAUNCHER"}))
-                    target_act.append(new_filter)
-                    act_name = target_act.attrib.get(qname("name"), "FirstActivity")
-                    changes.append(f"Created LEANBACK_LAUNCHER intent-filter on {act_name}")
+                changes.append(f"Set android:banner='{effective_banner}' on {act_name}")
+            if qname("label") not in target_act.attrib and app_label:
+                target_act.attrib[qname("label")] = app_label
+            if qname("icon") not in target_act.attrib and app_icon:
+                target_act.attrib[qname("icon")] = app_icon
 
     # Write patched manifest back to file
     tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
