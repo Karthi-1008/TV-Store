@@ -1,89 +1,113 @@
 package org.tvstore.remotebridge
 
 import android.content.Context
-import android.content.SharedPreferences
-import org.json.JSONArray
-import java.io.File
+import android.content.pm.PackageManager
+import java.util.concurrent.ConcurrentHashMap
+
+data class AppConversionInfo(
+    val isConverted: Boolean,
+    val mode: String, // "auto" | "pointer" | "navigate"
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 object ConvertedAppsRegistry {
 
-    private const val PREFS_NAME = "tv_bridge_registry"
-    private const val KEY_PACKAGES = "registered_packages"
+    const val META_CONVERTED = "org.tvstore.converted"
+    const val META_MODE = "org.tvstore.mode"
+    private const val CACHE_TTL_MS = 60_000L // 60 seconds cache
 
-    // Default pre-registered packages for testing/demo
-    private val DEFAULT_PACKAGES = setOf(
-        "com.gokadzev.musify",
-        "com.prismtv.gallery"
+    private val packageCache = ConcurrentHashMap<String, AppConversionInfo>()
+
+    // Fallback set for test/demo apps or older conversions
+    private val HARDCODED_FALLBACKS = mapOf(
+        "mark.via.gp" to "auto",
+        "com.gokadzev.musify" to "navigate",
+        "com.prismtv.gallery" to "navigate"
     )
 
-    private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    }
-
-    /**
-     * Retrieve all currently registered package names.
-     */
-    fun getRegisteredPackages(context: Context): Set<String> {
-        val prefs = getPrefs(context)
-        val saved = prefs.getStringSet(KEY_PACKAGES, null)
-        val result = (saved ?: DEFAULT_PACKAGES).toMutableSet()
-
-        // Also check if a JSON file was placed in external storage
-        try {
-            val extFile = File(context.getExternalFilesDir(null), "converted_packages.json")
-            if (extFile.exists()) {
-                val jsonStr = extFile.readText()
-                val jsonArr = JSONArray(jsonStr)
-                for (i in 0 until jsonArr.length()) {
-                    result.add(jsonArr.getString(i))
-                }
-            }
-        } catch (_: Exception) {
-            // Fail-silent
-        }
-
-        return result
-    }
-
-    /**
-     * Check if the given package is allowed to be handled by the bridge.
-     */
-    fun isRegistered(context: Context, packageName: String): Boolean {
-        // Never intercept Android TV Launcher or System UI
-        if (isSystemOrLauncher(packageName)) {
-            return false
-        }
-        return getRegisteredPackages(context).contains(packageName)
-    }
-
-    /**
-     * Register a new package name.
-     */
-    fun registerPackage(context: Context, packageName: String): Boolean {
-        if (packageName.isBlank() || isSystemOrLauncher(packageName)) return false
-        val current = getRegisteredPackages(context).toMutableSet()
-        current.add(packageName.trim())
-        return getPrefs(context).edit().putStringSet(KEY_PACKAGES, current).commit()
-    }
-
-    /**
-     * Unregister a package name.
-     */
-    fun unregisterPackage(context: Context, packageName: String): Boolean {
-        val current = getRegisteredPackages(context).toMutableSet()
-        val removed = current.remove(packageName.trim())
-        if (removed) {
-            getPrefs(context).edit().putStringSet(KEY_PACKAGES, current).apply()
-        }
-        return removed
-    }
-
-    private fun isSystemOrLauncher(packageName: String): Boolean {
+    fun isSystemOrLauncher(packageName: String): Boolean {
         return packageName.startsWith("com.google.android.tvlauncher") ||
                 packageName.startsWith("com.google.android.leanbacklauncher") ||
                 packageName.startsWith("com.android.systemui") ||
                 packageName.startsWith("com.android.tv.settings") ||
                 packageName == "android" ||
                 packageName == "org.tvstore.remotebridge"
+    }
+
+    /**
+     * Check if a package was converted by TV-Store by querying its manifest meta-data.
+     */
+    fun isRegistered(context: Context, packageName: String): Boolean {
+        if (packageName.isBlank() || isSystemOrLauncher(packageName)) {
+            return false
+        }
+
+        val cached = packageCache[packageName]
+        val now = System.currentTimeMillis()
+        if (cached != null && (now - cached.timestamp) < CACHE_TTL_MS) {
+            return cached.isConverted
+        }
+
+        val info = queryPackageInfo(context, packageName)
+        packageCache[packageName] = info
+        return info.isConverted
+    }
+
+    /**
+     * Get preferred navigation mode for this package: "auto", "pointer", or "navigate".
+     */
+    fun getMode(context: Context, packageName: String): String {
+        if (!isRegistered(context, packageName)) return "navigate"
+        return packageCache[packageName]?.mode ?: "auto"
+    }
+
+    private fun queryPackageInfo(context: Context, packageName: String): AppConversionInfo {
+        try {
+            val pm = context.packageManager
+            val appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+            val bundle = appInfo.metaData
+
+            if (bundle != null && (bundle.containsKey(META_CONVERTED) || bundle.get(META_CONVERTED) != null)) {
+                val mode = bundle.getString(META_MODE)
+                    ?: (if (bundle.getInt(META_MODE, -1) != -1) bundle.getInt(META_MODE).toString() else "auto")
+                return AppConversionInfo(isConverted = true, mode = mode)
+            }
+        } catch (_: Exception) {
+            // Fail-silent
+        }
+
+        // Check fallback
+        if (HARDCODED_FALLBACKS.containsKey(packageName)) {
+            return AppConversionInfo(isConverted = true, mode = HARDCODED_FALLBACKS[packageName] ?: "auto")
+        }
+
+        return AppConversionInfo(isConverted = false, mode = "navigate")
+    }
+
+    /**
+     * Query all installed apps that declare org.tvstore.converted meta-data.
+     */
+    fun getInstalledConvertedApps(context: Context): List<Pair<String, String>> {
+        val results = mutableListOf<Pair<String, String>>()
+        try {
+            val pm = context.packageManager
+            val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            for (app in apps) {
+                if (isSystemOrLauncher(app.packageName)) continue
+                val bundle = app.metaData
+                if (bundle != null && (bundle.containsKey(META_CONVERTED) || bundle.get(META_CONVERTED) != null)) {
+                    val mode = bundle.getString(META_MODE) ?: "auto"
+                    results.add(Pair(app.packageName, mode))
+                    packageCache[app.packageName] = AppConversionInfo(true, mode)
+                } else if (HARDCODED_FALLBACKS.containsKey(app.packageName)) {
+                    val mode = HARDCODED_FALLBACKS[app.packageName] ?: "auto"
+                    results.add(Pair(app.packageName, mode))
+                    packageCache[app.packageName] = AppConversionInfo(true, mode)
+                }
+            }
+        } catch (_: Exception) {
+            // Fail-silent
+        }
+        return results
     }
 }

@@ -9,9 +9,10 @@ from typing import List, Dict, Set, Optional
 
 import config
 from scanner.rules import (
-    Tier, Verdict,
+    Tier, Verdict, Capabilities,
     DEGRADABLE_HARDWARE_FEATURES,
-    DRM_AND_INTEGRITY_SIGNATURES,
+    HARD_DRM_SIGNATURES,
+    SOFT_INTEGRITY_SIGNATURES,
     GAME_ENGINE_NATIVE_LIBS,
     GAME_ENGINE_DEX_SIGNATURES,
     HYBRID_NATIVE_LIBS,
@@ -42,6 +43,7 @@ class APKMetadata:
 class APKScanResult:
     apk_path: Path
     metadata: APKMetadata
+    capabilities: Capabilities
     tier: Tier
     verdict: Verdict
     blockers: List[str] = field(default_factory=list)
@@ -66,7 +68,6 @@ def extract_badging_metadata(apk_path: Path) -> APKMetadata:
     for line in result.stdout.splitlines():
         line = line.strip()
         if line.startswith("package:"):
-            # package: name='com.example' versionCode='1' versionName='1.0'
             m_pkg = re.search(r"name='([^']+)'", line)
             m_vcode = re.search(r"versionCode='([^']+)'", line)
             m_vname = re.search(r"versionName='([^']+)'", line)
@@ -111,24 +112,48 @@ def extract_badging_metadata(apk_path: Path) -> APKMetadata:
             m = re.search(r"'([^']+)'", line)
             if m: meta.uses_gl_es = m.group(1)
         elif line.startswith("native-code:"):
-            # native-code: 'arm64-v8a' 'armeabi-v7a'
             abis = re.findall(r"'([^']+)'", line)
             meta.native_abis.extend(abis)
 
     return meta
 
+def check_is_browser(apk_path: Path) -> bool:
+    """Detect if APK registers as a web browser via APP_BROWSER or VIEW+BROWSABLE with http(s)."""
+    if not config.AAPT2_EXE or not config.AAPT2_EXE.exists():
+        return False
+    try:
+        cmd = [str(config.AAPT2_EXE), "dump", "xmltree", str(apk_path), "--file", "AndroidManifest.xml"]
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace", check=False)
+        if result.returncode != 0:
+            return False
+        tree = result.stdout
+        if "android.intent.category.APP_BROWSER" in tree:
+            return True
+        # Split on intent/intent-filter tags
+        filters = re.split(r"E:\s+intent(?:-filter)?", tree)
+        for f in filters[1:]:
+            if "android.intent.action.VIEW" in f and "android.intent.category.BROWSABLE" in f:
+                if ('"http"' in f or '"https"' in f or 'scheme(0x01010027)="http"' in f or 'scheme(0x01010027)="https"' in f):
+                    return True
+    except Exception:
+        pass
+    return False
+
 def scan_apk(apk_path: Path) -> APKScanResult:
-    """Run full Phase 0 pre-flight scan on the provided APK file."""
+    """Run full Phase 0 pre-flight capability scan on the provided APK file."""
     apk_path = Path(apk_path).resolve()
     if not apk_path.exists():
         raise FileNotFoundError(f"APK file not found: {apk_path}")
 
     metadata = extract_badging_metadata(apk_path)
+    is_browser = check_is_browser(apk_path)
+
     blockers: List[str] = []
     warnings: List[str] = []
     framework_notes: List[str] = []
     native_libs_found: List[str] = []
     dex_signatures_found: List[str] = []
+    exact_risk_signatures: List[str] = []
 
     # 1. Check Hardware Features in Manifest for Graceful Degradation
     degraded_features: List[tuple[str, str]] = []
@@ -138,10 +163,13 @@ def scan_apk(apk_path: Path) -> APKScanResult:
 
     # 2. Inspect ZIP contents (native libs & DEX strings)
     is_game = False
-    is_hybrid = False
+    is_flutter = False
+    is_react_native = False
+    is_webview = False
     is_swipe_feed = False
     has_native_views = False
-    has_drm = False
+    has_hard_drm = False
+    has_soft_integrity = False
 
     with zipfile.ZipFile(apk_path, 'r') as zf:
         namelist = zf.namelist()
@@ -153,10 +181,16 @@ def scan_apk(apk_path: Path) -> APKScanResult:
         for lib_name in so_files:
             if lib_name in GAME_ENGINE_NATIVE_LIBS:
                 is_game = True
-                blockers.append(f"Game Engine Library: {lib_name} ({GAME_ENGINE_NATIVE_LIBS[lib_name]})")
+                desc = GAME_ENGINE_NATIVE_LIBS[lib_name]
+                exact_risk_signatures.append(f"{lib_name} ({desc})")
+                blockers.append(f"Game Engine Library: {lib_name} ({desc})")
             if lib_name in HYBRID_NATIVE_LIBS:
-                is_hybrid = True
-                framework_notes.append(f"Hybrid Engine Library: {lib_name} ({HYBRID_NATIVE_LIBS[lib_name]})")
+                desc = HYBRID_NATIVE_LIBS[lib_name]
+                framework_notes.append(f"Hybrid Engine Library: {lib_name} ({desc})")
+                if "flutter" in lib_name:
+                    is_flutter = True
+                elif "react" in lib_name or "hermes" in lib_name:
+                    is_react_native = True
 
         # Scan DEX files for signatures
         dex_files = [p for p in namelist if p.startswith("classes") and p.endswith(".dex")]
@@ -167,23 +201,40 @@ def scan_apk(apk_path: Path) -> APKScanResult:
                 warnings.append(f"Failed to read {dex_name}: {e}")
                 continue
 
-            # Check DRM / Integrity
-            for sig, desc in DRM_AND_INTEGRITY_SIGNATURES.items():
+            # Check Hard DRM
+            for sig, desc in HARD_DRM_SIGNATURES.items():
                 if sig in dex_bytes:
-                    has_drm = True
-                    blockers.append(f"DRM / Integrity Protection: {desc} [{sig.decode('ascii', errors='ignore')}]")
+                    has_hard_drm = True
+                    sig_str = sig.decode('ascii', errors='ignore')
+                    exact_risk_signatures.append(f"Hard DRM: {desc} [{sig_str}]")
+                    blockers.append(f"Hard DRM / Anti-Tamper: {desc} [{sig_str}]")
+
+            # Check Soft Integrity
+            for sig, desc in SOFT_INTEGRITY_SIGNATURES.items():
+                if sig in dex_bytes:
+                    has_soft_integrity = True
+                    sig_str = sig.decode('ascii', errors='ignore')
+                    if sig_str not in [s.split('[')[-1].rstrip(']') for s in exact_risk_signatures]:
+                        exact_risk_signatures.append(f"Soft Integrity: {desc} [{sig_str}]")
+                        warnings.append(f"Soft Integrity Library: {desc} [{sig_str}]")
 
             # Check Game DEX signatures
             for sig, desc in GAME_ENGINE_DEX_SIGNATURES.items():
                 if sig in dex_bytes:
                     is_game = True
+                    exact_risk_signatures.append(f"Game Framework: {desc}")
                     blockers.append(f"Game Framework Detected: {desc}")
 
             # Check Hybrid DEX signatures
             for sig, desc in HYBRID_DEX_SIGNATURES.items():
                 if sig in dex_bytes:
-                    is_hybrid = True
                     dex_signatures_found.append(f"Hybrid: {desc}")
+                    if sig == b"io/flutter/embedding":
+                        is_flutter = True
+                    elif sig == b"com/facebook/react":
+                        is_react_native = True
+                    elif sig == b"android/webkit/WebView" or sig == b"org/apache/cordova" or sig == b"com/getcapacitor":
+                        is_webview = True
 
             # Check Swipe / ViewPager2
             for sig, desc in SWIPE_FEED_SIGNATURES.items():
@@ -199,56 +250,114 @@ def scan_apk(apk_path: Path) -> APKScanResult:
 
     # OpenGL ES check for Games vs Custom Canvas
     is_ambiguous_canvas = False
-    if metadata.uses_gl_es and not has_native_views and not is_hybrid:
+    if metadata.uses_gl_es and not has_native_views and not (is_flutter or is_react_native or is_webview):
         warnings.append(f"App declares OpenGL ES version {metadata.uses_gl_es} without standard widgets.")
         if "game" in metadata.package_name.lower():
             is_game = True
             blockers.append("Package name and OpenGL-only rendering suggest a game engine.")
+            exact_risk_signatures.append("Game: OpenGL-only rendering with 'game' in package name")
         else:
-            # Ambiguous case — don't hard-reject. Route to Tier 4 (manual calibration)
             is_ambiguous_canvas = True
-            warnings.append("Could not confirm standard UI framework; app may need manual hotspot calibration (Tier 4) rather than automatic rejection.")
+            warnings.append("Could not confirm standard UI framework; app may need manual hotspot calibration (Tier 4).")
 
-    # Determine UI / Framework Tier and Verdict
-    if blockers or has_drm or is_game:
-        tier = Tier.TIER_5_EXCLUDED
-        verdict = Verdict.REJECT
+    # Determine UI Framework string
+    if is_flutter:
+        ui_framework = "flutter"
+    elif is_react_native:
+        ui_framework = "react_native"
+    elif is_webview:
+        ui_framework = "hybrid_webview"
     elif is_ambiguous_canvas:
-        tier = Tier.TIER_4_CUSTOM_CANVAS
-        verdict = Verdict.WARN_MANUAL
-        framework_notes.append("Custom Canvas / OpenGL ES rendering detected without accessibility tree; requires manual hotspot calibration (Tier 4).")
-    elif is_swipe_feed:
-        tier = Tier.TIER_3_GESTURE_MACRO
-        verdict = Verdict.PROCEED
-        framework_notes.append("Requires Engine A + Engine B with Gesture Macro mapping.")
-    elif is_hybrid:
-        tier = Tier.TIER_2_HYBRID_BRIDGE
-        verdict = Verdict.PROCEED
-        framework_notes.append("Requires Engine A + Engine B Accessibility Bridge (Tree-Walk).")
+        ui_framework = "canvas"
     else:
-        tier = Tier.TIER_1_NATIVE_VIEWS
-        verdict = Verdict.PROCEED
-        if has_native_views:
-            framework_notes.append("Standard Android Views/Compose detected. Engine A (Manifest patch) should be sufficient.")
-        else:
-            framework_notes.append("No specific framework signature matched; defaulting to Tier 1. Verify D-pad focus manually after conversion.")
+        ui_framework = "native"
 
-    # Hardware Degradation is an orthogonal advisory note on top of the real tier
+    # Evaluate Risk Level and Verdict
+    # Verdict comes ONLY from risk. Framework/pager/browser/hardware never cause rejection.
+    if has_hard_drm:
+        risk = "hard_drm"
+        verdict = Verdict.REJECT
+        tier = Tier.TIER_5_EXCLUDED
+        summary_tier = "Tier 5 (Excluded: Hard DRM)"
+    elif is_game:
+        risk = "game"
+        verdict = Verdict.REJECT
+        tier = Tier.TIER_5_EXCLUDED
+        summary_tier = "Tier 5 (Excluded: Game Engine)"
+    elif has_soft_integrity:
+        risk = "soft_integrity"
+        verdict = Verdict.WARN_RISKY
+        # summary tier determined by UI features
+        if ui_framework != "native" and is_swipe_feed:
+            summary_tier = "Tier 2 + Tier 3 features"
+            tier = Tier.TIER_2_HYBRID_BRIDGE
+        elif is_swipe_feed:
+            summary_tier = "Tier 1 + Tier 3 features"
+            tier = Tier.TIER_3_GESTURE_MACRO
+        elif ui_framework != "native":
+            summary_tier = f"Tier 2 ({ui_framework.replace('_', ' ').title()})"
+            tier = Tier.TIER_2_HYBRID_BRIDGE
+        else:
+            summary_tier = "Tier 1 (Native Views)"
+            tier = Tier.TIER_1_NATIVE_VIEWS
+    elif is_ambiguous_canvas:
+        risk = "ambiguous_canvas"
+        verdict = Verdict.WARN_MANUAL
+        tier = Tier.TIER_4_CUSTOM_CANVAS
+        summary_tier = "Tier 4 (Custom Canvas)"
+    else:
+        risk = "none"
+        verdict = Verdict.PROCEED
+        if ui_framework != "native" and is_swipe_feed:
+            summary_tier = "Tier 2 + Tier 3 features"
+            tier = Tier.TIER_2_HYBRID_BRIDGE
+        elif is_swipe_feed:
+            summary_tier = "Tier 1 + Tier 3 features"
+            tier = Tier.TIER_3_GESTURE_MACRO
+        elif ui_framework != "native":
+            summary_tier = f"Tier 2 ({ui_framework.replace('_', ' ').title()})"
+            tier = Tier.TIER_2_HYBRID_BRIDGE
+        else:
+            summary_tier = "Tier 1 (Native Views)"
+            tier = Tier.TIER_1_NATIVE_VIEWS
+
+    # Needs bridge for anything except pure native
+    needs_bridge = (ui_framework != "native" or is_swipe_feed or is_browser)
+
+    degraded_names = [feat.split(".")[-1] for feat, _ in degraded_features]
     has_hardware_degradation = len(degraded_features) > 0
+
+    capabilities = Capabilities(
+        ui_framework=ui_framework,
+        needs_bridge=needs_bridge,
+        has_pager=is_swipe_feed,
+        is_browser=is_browser,
+        degraded_hardware=degraded_names,
+        risk=risk,
+        exact_risk_signatures=exact_risk_signatures,
+        summary_tier=summary_tier,
+    )
+
+    if is_browser:
+        framework_notes.append("Browser Application: Virtual mouse pointer mode enabled by default for web content.")
+    if is_swipe_feed:
+        framework_notes.append("Pager / Feed detected: Gesture swipe macros available for vertical/horizontal paging.")
+    if ui_framework == "hybrid_webview":
+        framework_notes.append("Hybrid WebView detected: Accessibility bridge tree-walk / pointer navigation active.")
+
     if has_hardware_degradation:
         for feat, note in degraded_features:
             warnings.append(f"Hardware not available on TV: {feat} — {note}")
-        hardware_list_str = ", ".join(f[0].split(".")[-1] for f in degraded_features)
-        engine_str = "Engine A (Manifest patch)" if tier == Tier.TIER_1_NATIVE_VIEWS else "Engine A + TV Remote Bridge"
+        hardware_list_str = ", ".join(degraded_names)
         framework_notes.append(
             f"Hardware Degradation Note: App requires unavailable hardware ({hardware_list_str}). "
-            "Manifest will be relaxed so app installs; features requiring this hardware will be disabled, "
-            f"while the rest of the app navigates using {engine_str}."
+            "Manifest will be relaxed so app installs; features requiring this hardware will be disabled."
         )
 
     return APKScanResult(
         apk_path=apk_path,
         metadata=metadata,
+        capabilities=capabilities,
         tier=tier,
         verdict=verdict,
         blockers=blockers,

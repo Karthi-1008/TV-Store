@@ -99,4 +99,49 @@ object SpatialNavigator {
 
         return bestCandidate
     }
+
+    /**
+     * Find the web content area (WebView node or fallback largest empty leaf node covering >50% screen).
+     */
+    fun findWebArea(root: AccessibilityNodeInfo?, screenWidth: Int, screenHeight: Int): Rect? {
+        if (root == null) return null
+        var webViewRect: Rect? = null
+        var largestFallbackRect: Rect? = null
+        var largestFallbackArea = 0
+        val totalScreenArea = screenWidth * screenHeight
+
+        fun traverse(node: AccessibilityNodeInfo) {
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            val className = node.className?.toString() ?: ""
+
+            if (className.contains("WebView", ignoreCase = true) || className == "android.webkit.WebView") {
+                if (bounds.width() > 100 && bounds.height() > 100) {
+                    webViewRect = Rect(bounds)
+                    return
+                }
+            }
+
+            val area = bounds.width() * bounds.height()
+            if (area > (totalScreenArea * 0.45) && node.childCount == 0 && !node.isFocusable && !node.isClickable) {
+                if (area > largestFallbackArea) {
+                    largestFallbackArea = area
+                    largestFallbackRect = Rect(bounds)
+                }
+            }
+
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                traverse(child)
+            }
+        }
+
+        try {
+            traverse(root)
+        } catch (_: Exception) {
+            // Fail-silent
+        }
+
+        return webViewRect ?: largestFallbackRect
+    }
 }

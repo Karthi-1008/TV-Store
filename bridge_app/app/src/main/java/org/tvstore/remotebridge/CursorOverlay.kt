@@ -6,6 +6,8 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.WindowManager
 
@@ -53,9 +55,25 @@ class CursorOverlay(private val context: Context) {
         overlayView.setFocusRect(rect)
     }
 
+    fun updatePointer(x: Float, y: Float) {
+        show()
+        overlayView.setPointer(x, y)
+    }
+
+    fun showModeIndicator(modeText: String) {
+        show()
+        overlayView.showIndicator(modeText)
+    }
+
     private class FocusFrameView(context: Context) : View(context) {
         private var focusRect: RectF? = null
+        private var pointerX: Float = -1f
+        private var pointerY: Float = -1f
+        private var showPointer: Boolean = false
+        private var indicatorText: String? = null
+        private val uiHandler = Handler(Looper.getMainLooper())
 
+        // Focus Frame Paints
         private val outerGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 10f
@@ -68,9 +86,40 @@ class CursorOverlay(private val context: Context) {
             color = 0xFFFFFFFF.toInt()
         }
 
+        // Pointer Paints (Redraws only on key events, no timer loops)
+        private val pointerDarkRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            color = 0xAA000000.toInt()
+        }
+
+        private val pointerBrightRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
+            color = 0xFFFFFFFF.toInt()
+        }
+
+        private val pointerCenterDot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = 0xFF3D7BFD.toInt()
+        }
+
+        // Indicator Pill Paints
+        private val pillBackground = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = 0xCC1A1A1A.toInt()
+        }
+
+        private val pillTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFFFFFFF.toInt()
+            textSize = 28f
+            isFakeBoldText = true
+            textAlign = Paint.Align.CENTER
+        }
+
         fun setFocusRect(rect: Rect?) {
+            showPointer = false
             focusRect = if (rect != null && !rect.isEmpty) {
-                // Expand rect by 4dp padding
                 val pad = 6f
                 RectF(rect.left - pad, rect.top - pad, rect.right + pad, rect.bottom + pad)
             } else {
@@ -79,12 +128,50 @@ class CursorOverlay(private val context: Context) {
             invalidate()
         }
 
+        fun setPointer(x: Float, y: Float) {
+            focusRect = null
+            pointerX = x
+            pointerY = y
+            showPointer = true
+            invalidate()
+        }
+
+        fun showIndicator(text: String) {
+            indicatorText = text
+            invalidate()
+            uiHandler.removeCallbacksAndMessages(null)
+            uiHandler.postDelayed({
+                indicatorText = null
+                invalidate()
+            }, 1400)
+        }
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val r = focusRect ?: return
-            val radius = 12f
-            canvas.drawRoundRect(r, radius, radius, outerGlowPaint)
-            canvas.drawRoundRect(r, radius, radius, framePaint)
+
+            // 1. Draw Native Focus Bounding Box
+            focusRect?.let { r ->
+                val radius = 12f
+                canvas.drawRoundRect(r, radius, radius, outerGlowPaint)
+                canvas.drawRoundRect(r, radius, radius, framePaint)
+            }
+
+            // 2. Draw Virtual Vector Mouse Pointer
+            if (showPointer && pointerX >= 0 && pointerY >= 0) {
+                canvas.drawCircle(pointerX, pointerY, 13f, pointerDarkRing)
+                canvas.drawCircle(pointerX, pointerY, 11f, pointerBrightRing)
+                canvas.drawCircle(pointerX, pointerY, 5f, pointerCenterDot)
+            }
+
+            // 3. Draw Brief Mode Indicator Pill
+            indicatorText?.let { text ->
+                val textWidth = pillTextPaint.measureText(text)
+                val cx = width / 2f
+                val top = 40f
+                val pillRect = RectF(cx - textWidth / 2f - 30f, top, cx + textWidth / 2f + 30f, top + 52f)
+                canvas.drawRoundRect(pillRect, 26f, 26f, pillBackground)
+                canvas.drawText(text, cx, top + 36f, pillTextPaint)
+            }
         }
     }
 }

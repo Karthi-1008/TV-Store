@@ -37,6 +37,37 @@ object GestureMacro {
     }
 
     /**
+     * Dispatch synthetic long press at (x, y) coordinates (duration ~650ms).
+     */
+    fun performLongPress(
+        service: AccessibilityService,
+        x: Float,
+        y: Float,
+        durationMs: Long = 650,
+        onComplete: (() -> Unit)? = null
+    ): Boolean {
+        return try {
+            val path = Path().apply {
+                moveTo(x, y)
+            }
+            val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+
+            service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    onComplete?.invoke()
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    // Fail-silent
+                }
+            }, null)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
      * Dispatch synthetic swipe from (startX, startY) to (endX, endY).
      */
     fun performSwipe(
@@ -45,7 +76,7 @@ object GestureMacro {
         startY: Float,
         endX: Float,
         endY: Float,
-        durationMs: Long = 280,
+        durationMs: Long = 250,
         onComplete: (() -> Unit)? = null
     ): Boolean {
         return try {

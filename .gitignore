@@ -15,3 +15,7 @@ bridge_app/app/build/
 # Tools and archive cache
 tools/*.jar
 *.zip
+
+# Local test APKs and registries
+/*.apk
+/converted_packages.json

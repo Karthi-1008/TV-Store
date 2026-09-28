@@ -13,7 +13,11 @@ def qname(tag_or_attr: str) -> str:
     """Helper to produce Clark notation for Android namespace."""
     return f"{{{ANDROID_NS}}}{tag_or_attr}"
 
-def patch_manifest(decompiled_dir: Path, banner_drawable: str = "@drawable/tv_banner") -> Tuple[bool, List[str]]:
+def patch_manifest(
+    decompiled_dir: Path,
+    banner_drawable: str = "@drawable/tv_banner",
+    mode: str = "auto"
+) -> Tuple[bool, List[str]]:
     """Patch AndroidManifest.xml in decompiled_dir for Android TV.
     
     Returns:
@@ -93,12 +97,37 @@ def patch_manifest(decompiled_dir: Path, banner_drawable: str = "@drawable/tv_ba
                 elem.attrib[qname("required")] = "false"
                 changes.append(f"Relaxed {feat_name} to required='false' (graceful hardware degradation)")
 
-    # 5. Patch Application tag (banner, hardware acceleration, resizeable)
+    # 5. Patch Application tag (banner, metadata, hardware acceleration, resizeable)
     app_elem = root.find("application")
     if app_elem is not None:
         if qname("banner") not in app_elem.attrib:
             app_elem.attrib[qname("banner")] = banner_drawable
             changes.append(f"Set application android:banner='{banner_drawable}'")
+
+        # Inject TV-Store self-identification markers
+        has_converted_meta = any(
+            m.attrib.get(qname("name")) == "org.tvstore.converted"
+            for m in app_elem.findall("meta-data")
+        )
+        if not has_converted_meta:
+            meta_conv = ET.Element("meta-data", {
+                qname("name"): "org.tvstore.converted",
+                qname("value"): "1"
+            })
+            app_elem.append(meta_conv)
+            changes.append("Injected org.tvstore.converted=1 meta-data")
+
+        has_mode_meta = any(
+            m.attrib.get(qname("name")) == "org.tvstore.mode"
+            for m in app_elem.findall("meta-data")
+        )
+        if not has_mode_meta:
+            meta_mode = ET.Element("meta-data", {
+                qname("name"): "org.tvstore.mode",
+                qname("value"): mode
+            })
+            app_elem.append(meta_mode)
+            changes.append(f"Injected org.tvstore.mode='{mode}' meta-data")
 
         # Strip post-API 30 attributes unknown to older framework definitions (baseline TV is API 30)
         unsupported_qnames = {qname(attr) for attr in config.UNSUPPORTED_POST_API30_ATTRS}

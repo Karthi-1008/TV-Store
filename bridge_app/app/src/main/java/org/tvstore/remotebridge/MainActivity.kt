@@ -53,8 +53,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshRegisteredPackages() {
-        val packages = ConvertedAppsRegistry.getRegisteredPackages(this).sorted()
-        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, packages)
+        val apps = ConvertedAppsRegistry.getInstalledConvertedApps(this)
+        val items = if (apps.isEmpty()) {
+            listOf("No converted apps detected yet.\n(Apps converted with TV-Store will appear here automatically)")
+        } else {
+            apps.map { "${it.first}  [mode: ${it.second}]" }
+        }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, items)
         lvPackages.adapter = adapter
     }
 

@@ -8,6 +8,9 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <!-- Needed on Android 11+ (API 30) to inspect meta-data of converted apps -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
@@ -37,15 +40,6 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
-
-        <receiver
-            android:name=".PackageReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="org.tvstore.remotebridge.ACTION_REGISTER_PACKAGE" />
-                <action android:name="org.tvstore.remotebridge.ACTION_UNREGISTER_PACKAGE" />
-            </intent-filter>
-        </receiver>
     </application>
 
 </manifest>
