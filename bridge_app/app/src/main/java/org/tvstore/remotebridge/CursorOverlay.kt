@@ -60,6 +60,14 @@ class CursorOverlay(private val context: Context) {
         overlayView.setPointer(x, y)
     }
 
+    fun setClickEffect(pressed: Boolean) {
+        overlayView.setClickPressed(pressed)
+    }
+
+    fun getCurrentPosition(): Pair<Float, Float> {
+        return overlayView.getPointerPosition()
+    }
+
     fun showModeIndicator(modeText: String) {
         show()
         overlayView.showIndicator(modeText)
@@ -70,6 +78,7 @@ class CursorOverlay(private val context: Context) {
         private var pointerX: Float = -1f
         private var pointerY: Float = -1f
         private var showPointer: Boolean = false
+        private var isClickPressed: Boolean = false
         private var indicatorText: String? = null
         private val uiHandler = Handler(Looper.getMainLooper())
 
@@ -86,7 +95,7 @@ class CursorOverlay(private val context: Context) {
             color = 0xFFFFFFFF.toInt()
         }
 
-        // Pointer Paints (Redraws only on key events, no timer loops)
+        // Pointer Paints (Authentic TV browser pointer with high visibility)
         private val pointerDarkRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 5f
@@ -102,6 +111,18 @@ class CursorOverlay(private val context: Context) {
         private val pointerCenterDot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = 0xFF3D7BFD.toInt()
+        }
+
+        // Click Ripple & Pressed Paints
+        private val clickRipplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 4f
+            color = 0x993D7BFD.toInt()
+        }
+
+        private val clickCenterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = 0xFFFFFFFF.toInt()
         }
 
         // Indicator Pill Paints
@@ -136,6 +157,15 @@ class CursorOverlay(private val context: Context) {
             invalidate()
         }
 
+        fun setClickPressed(pressed: Boolean) {
+            isClickPressed = pressed
+            invalidate()
+        }
+
+        fun getPointerPosition(): Pair<Float, Float> {
+            return Pair(pointerX, pointerY)
+        }
+
         fun showIndicator(text: String) {
             indicatorText = text
             invalidate()
@@ -158,9 +188,18 @@ class CursorOverlay(private val context: Context) {
 
             // 2. Draw Virtual Vector Mouse Pointer
             if (showPointer && pointerX >= 0 && pointerY >= 0) {
-                canvas.drawCircle(pointerX, pointerY, 13f, pointerDarkRing)
-                canvas.drawCircle(pointerX, pointerY, 11f, pointerBrightRing)
-                canvas.drawCircle(pointerX, pointerY, 5f, pointerCenterDot)
+                if (isClickPressed) {
+                    // Tactile click ripple effect
+                    canvas.drawCircle(pointerX, pointerY, 26f, clickRipplePaint)
+                    canvas.drawCircle(pointerX, pointerY, 18f, pointerDarkRing)
+                    canvas.drawCircle(pointerX, pointerY, 16f, pointerBrightRing)
+                    canvas.drawCircle(pointerX, pointerY, 8f, clickCenterPaint)
+                } else {
+                    // Regular resting pointer
+                    canvas.drawCircle(pointerX, pointerY, 18f, pointerDarkRing)
+                    canvas.drawCircle(pointerX, pointerY, 16f, pointerBrightRing)
+                    canvas.drawCircle(pointerX, pointerY, 6f, pointerCenterDot)
+                }
             }
 
             // 3. Draw Brief Mode Indicator Pill

@@ -2,6 +2,8 @@ package org.tvstore.remotebridge
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -22,11 +24,38 @@ class RemoteBridgeService : AccessibilityService() {
     private var pointerX = 640f
     private var pointerY = 360f
 
-    // OK long-press tracking
-    private var okDownTime = 0L
+    // Explicit Movement Loop for TV Remotes (Smooth continuous movement while held)
+    private val moveHandler = Handler(Looper.getMainLooper())
+    private var moveDx = 0f
+    private var moveDy = 0f
+    private var moveSpeed = MIN_STEP
+    private var isMoving = false
+
+    private val moveTick = object : Runnable {
+        override fun run() {
+            if (!isMoving) return
+            applyPointerMove(moveDx * moveSpeed, moveDy * moveSpeed)
+            moveSpeed = (moveSpeed + ACCELERATION).coerceAtMost(MAX_STEP)
+            moveHandler.postDelayed(this, FRAME_MS)
+        }
+    }
+
+    // OK click & long-press handler
+    private val okHandler = Handler(Looper.getMainLooper())
     private var okLongPressTriggered = false
+    private val longPressRunnable = Runnable {
+        okLongPressTriggered = true
+        GestureMacro.performLongPress(this, pointerX, pointerY)
+    }
 
     private var currentForegroundPackage: String? = null
+
+    companion object {
+        private const val FRAME_MS = 16L     // ~60fps, matches TV panel refresh
+        private const val MIN_STEP = 6f      // dp per frame at the start of a hold
+        private const val MAX_STEP = 30f     // dp per frame after ramping up
+        private const val ACCELERATION = 0.5f // dp added per frame while held
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -63,6 +92,7 @@ class RemoteBridgeService : AccessibilityService() {
             val pkg = it.toString()
             if (pkg != currentForegroundPackage) {
                 currentForegroundPackage = pkg
+                stopMoving()
                 configuredAppMode = ConvertedAppsRegistry.getMode(this, pkg)
                 // If package is configured as pointer-only, activate pointer immediately
                 if (configuredAppMode == "pointer") {
@@ -78,6 +108,7 @@ class RemoteBridgeService : AccessibilityService() {
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                stopMoving()
                 currentFocus = null
                 if (activeMode == "navigate") {
                     cursorOverlay.updateFocus(null)
@@ -102,6 +133,8 @@ class RemoteBridgeService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
+        stopMoving()
+        okHandler.removeCallbacks(longPressRunnable)
         currentFocus = null
         cursorOverlay.hide()
     }
@@ -144,6 +177,8 @@ class RemoteBridgeService : AccessibilityService() {
     }
 
     private fun toggleMode(): Boolean {
+        stopMoving()
+        okHandler.removeCallbacks(longPressRunnable)
         activeMode = if (activeMode == "pointer") "navigate" else "pointer"
         val indicator = if (activeMode == "pointer") "Pointer Mode" else "D-pad Mode"
         cursorOverlay.showModeIndicator(indicator)
@@ -167,90 +202,117 @@ class RemoteBridgeService : AccessibilityService() {
     }
 
     // =========================================================================
-    // POINTER MODE: Virtual Mouse Pointer with Speed Ramping and Edge Scroll
+    // POINTER MODE: 60fps Loop Movement, Dynamic Acceleration, and Click Handling
     // =========================================================================
+
+    private fun startMoving(dx: Float, dy: Float) {
+        moveDx = dx
+        moveDy = dy
+        moveSpeed = MIN_STEP
+        if (!isMoving) {
+            isMoving = true
+            moveHandler.post(moveTick)
+        }
+    }
+
+    private fun stopMoving() {
+        isMoving = false
+        moveHandler.removeCallbacks(moveTick)
+        moveSpeed = MIN_STEP
+        moveDx = 0f
+        moveDy = 0f
+    }
+
+    private fun applyPointerMove(dx: Float, dy: Float) {
+        val root = rootInActiveWindow
+        val webArea = SpatialNavigator.findWebArea(root, screenWidth, screenHeight)
+
+        if (dy < 0) { // moving up
+            val topBoundary = webArea?.top?.toFloat() ?: 0f
+            if (pointerY <= topBoundary + 15f) {
+                // In auto mode, returning past top edge hands control back to native toolbar focus
+                if (configuredAppMode == "auto") {
+                    val toolbarNodes = SpatialNavigator.findInteractiveNodes(root, screenWidth, screenHeight)
+                        .filter { cand -> (webArea == null || cand.bounds.bottom <= webArea.top + 30) }
+                    val best = toolbarNodes.minByOrNull {
+                        abs(it.bounds.centerX() - pointerX) + (topBoundary - it.bounds.bottom)
+                    }
+                    if (best != null) {
+                        stopMoving()
+                        activeMode = "navigate"
+                        currentFocus = best
+                        cursorOverlay.updateFocus(best.bounds)
+                        return
+                    }
+                }
+                // Edge scroll: swipe down to scroll content up
+                GestureMacro.performSwipe(this, pointerX, pointerY, pointerX, (pointerY + 280f).coerceAtMost(screenHeight.toFloat()), 220)
+                return
+            }
+        }
+        if (dy > 0) { // moving down
+            val bottomBoundary = webArea?.bottom?.toFloat() ?: screenHeight.toFloat()
+            if (pointerY >= bottomBoundary - 25f) {
+                // Edge scroll: swipe up to scroll content down
+                GestureMacro.performSwipe(this, pointerX, pointerY, pointerX, (pointerY - 280f).coerceAtLeast(0f), 220)
+                return
+            }
+        }
+
+        pointerX = (pointerX + dx).coerceIn(0f, screenWidth.toFloat())
+        pointerY = (pointerY + dy).coerceIn(0f, screenHeight.toFloat())
+        cursorOverlay.updatePointer(pointerX, pointerY)
+    }
 
     private fun handlePointerKeyEvent(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
         val action = event.action
 
-        // OK / Enter Button: Tap on release, long-press if held
+        // 1. OK / Enter Button: Visual feedback + Tap on release + Long-press if held
         if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-            if (action == KeyEvent.ACTION_DOWN) {
-                if (event.repeatCount == 0) {
-                    okDownTime = System.currentTimeMillis()
-                    okLongPressTriggered = false
-                }
-                if (!okLongPressTriggered && (event.repeatCount >= 4 || (System.currentTimeMillis() - okDownTime >= 500))) {
-                    okLongPressTriggered = true
-                    GestureMacro.performLongPress(this, pointerX, pointerY)
-                }
-                return true
-            } else if (action == KeyEvent.ACTION_UP) {
-                if (!okLongPressTriggered) {
-                    GestureMacro.performTap(this, pointerX, pointerY)
-                }
-                return true
-            }
-        }
-
-        if (action != KeyEvent.ACTION_DOWN) {
-            return super.onKeyEvent(event)
-        }
-
-        // Speed ramps with repeat count (10dp base up to ~55dp per step)
-        val step = (10f + event.repeatCount * 4.5f).coerceAtMost(55f)
-        val root = rootInActiveWindow
-        val webArea = SpatialNavigator.findWebArea(root, screenWidth, screenHeight)
-
-        return when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> {
-                val topBoundary = webArea?.top?.toFloat() ?: 0f
-                if (pointerY <= topBoundary + 15f) {
-                    // In auto mode, returning past top edge hands control back to native toolbar focus
-                    if (configuredAppMode == "auto") {
-                        val toolbarNodes = SpatialNavigator.findInteractiveNodes(root, screenWidth, screenHeight)
-                            .filter { cand -> (webArea == null || cand.bounds.bottom <= webArea.top + 30) }
-                        val best = toolbarNodes.minByOrNull {
-                            abs(it.bounds.centerX() - pointerX) + (topBoundary - it.bounds.bottom)
-                        }
-                        if (best != null) {
-                            activeMode = "navigate"
-                            currentFocus = best
-                            cursorOverlay.updateFocus(best.bounds)
-                            return true
-                        }
+            when (action) {
+                KeyEvent.ACTION_DOWN -> {
+                    if (event.repeatCount == 0) {
+                        okLongPressTriggered = false
+                        cursorOverlay.setClickEffect(true)
+                        okHandler.removeCallbacks(longPressRunnable)
+                        okHandler.postDelayed(longPressRunnable, 500)
                     }
-                    // Edge scroll: swipe down to scroll content up
-                    GestureMacro.performSwipe(this, pointerX, pointerY, pointerX, (pointerY + 280f).coerceAtMost(screenHeight.toFloat()), 220)
-                } else {
-                    pointerY = (pointerY - step).coerceAtLeast(0f)
-                    cursorOverlay.updatePointer(pointerX, pointerY)
                 }
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_DOWN -> {
-                val bottomBoundary = webArea?.bottom?.toFloat() ?: screenHeight.toFloat()
-                if (pointerY >= bottomBoundary - 25f) {
-                    // Edge scroll: swipe up to scroll content down
-                    GestureMacro.performSwipe(this, pointerX, pointerY, pointerX, (pointerY - 280f).coerceAtLeast(0f), 220)
-                } else {
-                    pointerY = (pointerY + step).coerceAtMost(screenHeight.toFloat())
-                    cursorOverlay.updatePointer(pointerX, pointerY)
+                KeyEvent.ACTION_UP -> {
+                    okHandler.removeCallbacks(longPressRunnable)
+                    cursorOverlay.setClickEffect(false)
+                    if (!okLongPressTriggered) {
+                        GestureMacro.performTap(this, pointerX, pointerY)
+                    }
                 }
-                true
             }
-            KeyEvent.KEYCODE_DPAD_LEFT -> {
-                pointerX = (pointerX - step).coerceAtLeast(0f)
-                cursorOverlay.updatePointer(pointerX, pointerY)
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                pointerX = (pointerX + step).coerceAtMost(screenWidth.toFloat())
-                cursorOverlay.updatePointer(pointerX, pointerY)
-                true
+            return true
+        }
+
+        // 2. D-pad Directions: 60fps Movement Loop on ACTION_DOWN, stop on ACTION_UP
+        when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                when (action) {
+                    KeyEvent.ACTION_DOWN -> {
+                        val (dx, dy) = when (keyCode) {
+                            KeyEvent.KEYCODE_DPAD_UP -> 0f to -1f
+                            KeyEvent.KEYCODE_DPAD_DOWN -> 0f to 1f
+                            KeyEvent.KEYCODE_DPAD_LEFT -> -1f to 0f
+                            else -> 1f to 0f
+                        }
+                        startMoving(dx, dy)
+                    }
+                    KeyEvent.ACTION_UP -> {
+                        stopMoving()
+                    }
+                }
+                return true
             }
             KeyEvent.KEYCODE_BACK -> {
+                if (action != KeyEvent.ACTION_DOWN) return super.onKeyEvent(event)
+                stopMoving()
                 // In auto mode, Back clears pointer and returns to toolbar if available
                 if (configuredAppMode == "auto") {
                     val rootNow = rootInActiveWindow
@@ -264,9 +326,12 @@ class RemoteBridgeService : AccessibilityService() {
                         return true
                     }
                 }
-                super.onKeyEvent(event)
+                return super.onKeyEvent(event)
             }
-            else -> super.onKeyEvent(event)
+            else -> {
+                if (action != KeyEvent.ACTION_DOWN) return super.onKeyEvent(event)
+                return super.onKeyEvent(event)
+            }
         }
     }
 
@@ -375,10 +440,10 @@ class RemoteBridgeService : AccessibilityService() {
         val cx = target.bounds.centerX().toFloat()
         val cy = target.bounds.centerY().toFloat()
 
-        val clicked = try {
+        try {
             target.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         } catch (_: Exception) {
-            false
+            // Fail-silent
         }
 
         GestureMacro.performTap(this, cx, cy)
@@ -397,6 +462,8 @@ class RemoteBridgeService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopMoving()
+        okHandler.removeCallbacks(longPressRunnable)
         cursorOverlay.hide()
     }
 }
